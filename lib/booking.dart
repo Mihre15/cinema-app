@@ -23,6 +23,7 @@ class BookingPage extends StatefulWidget {
 class _BookingPageState extends State<BookingPage> {
   final String baseUrl = 'http://10.0.2.2:3000';
   List<String> selectedSeats = [];
+  List<String> totalPrice=[];
   List<dynamic> availableSeats = [];
   bool isLoading = true;
   String? errorMessage;
@@ -68,7 +69,6 @@ class _BookingPageState extends State<BookingPage> {
       } else {
         selectedSeats.add(seatNumber);
       }
-       print('Currently selected seats: $selectedSeats');
     });
   }
 
@@ -87,10 +87,12 @@ class _BookingPageState extends State<BookingPage> {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'movie_id': widget.movieId,
-          'seats': selectedSeats,
+          'seat_numbers': selectedSeats,
+          'total_price': totalPrice,
+          'payment_method':'cash',
         }),
       );
-     print('Booking response: ${response.statusCode} - ${response.body}'); // Debug
+      print('Booking response: ${response.statusCode} - ${response.body}');
       final responseData = jsonDecode(response.body);
 
       if (response.statusCode == 201) {
