@@ -1,9 +1,11 @@
+
 import 'package:flutter/material.dart';
 import 'package:pra/Home.dart';
 import 'package:http/http.dart' as http;
 import 'package:pra/models/user_state.dart';
 import 'dart:convert';
 import 'admin-nav.dart';
+import 'package:pra/nav.dart';
 
 void main() {
   runApp(MaterialApp(
@@ -155,7 +157,7 @@ class _Admin extends State<Admin> {
                       onPressed: () {
                         Navigator.push(
                           context,
-                          MaterialPageRoute(builder: (context) => Home()),
+                          MaterialPageRoute(builder: (context) => Navigation()),
                         );
                       },
                       style: TextButton.styleFrom(

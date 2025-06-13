@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
+import 'package:dio/dio.dart';
 
 class BookingPage extends StatefulWidget {
   final String movieId;
@@ -23,7 +22,6 @@ class BookingPage extends StatefulWidget {
 class _BookingPageState extends State<BookingPage> {
   final String baseUrl = 'http://10.0.2.2:3000';
   List<String> selectedSeats = [];
-  List<String> totalPrice=[];
   List<dynamic> availableSeats = [];
   bool isLoading = true;
   String? errorMessage;
@@ -36,29 +34,27 @@ class _BookingPageState extends State<BookingPage> {
 
   Future<void> _fetchSeatAvailability() async {
     try {
-    final response = await http.get(
-      Uri.parse('$baseUrl/movies/${widget.movieId}/seats'),
-    );
+      final response = await Dio().get('$baseUrl/movies/${widget.movieId}/seats');
 
-    if (response.statusCode == 200) {
-      final List<dynamic> data = jsonDecode(response.body);
+      if (response.statusCode == 200) {
+        final List<dynamic> data = response.data;
+        setState(() {
+          availableSeats = List<Map<String, dynamic>>.from(
+            data.map((item) => {
+              'number': item['seat_number'].toString(),
+              'isBooked': item['is_booked'] == 1,
+            }),
+          );
+          isLoading = false;
+        });
+      } else {
+        throw Exception('Failed to load seat availability');
+      }
+    } catch (e) {
       setState(() {
-        availableSeats = List<Map<String, dynamic>>.from(
-          data.map((item) => {
-            'number': item['seat_number'].toString(),
-            'isBooked': item['is_booked'] == 1,
-          })
-        );
+        errorMessage = 'Error: ${e.toString()}';
         isLoading = false;
       });
-    } else {
-      throw Exception('Failed to load seat availability');
-    }
-  } catch (e) {
-    setState(() {
-      errorMessage = 'Error: ${e.toString()}';
-      isLoading = false;
-    });
     }
   }
 
@@ -73,7 +69,6 @@ class _BookingPageState extends State<BookingPage> {
   }
 
   Future<void> _confirmBooking() async {
-    print('Attempting to book seats: $selectedSeats');
     if (selectedSeats.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please select at least one seat')),
@@ -82,18 +77,25 @@ class _BookingPageState extends State<BookingPage> {
     }
 
     try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/bookings'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
+      final totalPrice = selectedSeats.length * double.parse(widget.moviePrice);
+
+      final dio = Dio();
+      final response = await dio.post(
+        '$baseUrl/bookings',
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        ),
+        data: {
           'movie_id': widget.movieId,
           'seat_numbers': selectedSeats,
           'total_price': totalPrice,
-          'payment_method':'cash',
-        }),
+          'payment_method': 'cash',
+        },
       );
-      print('Booking response: ${response.statusCode} - ${response.body}');
-      final responseData = jsonDecode(response.body);
+
+      final responseData = response.data;
 
       if (response.statusCode == 201) {
         Navigator.pushReplacement(
@@ -102,13 +104,12 @@ class _BookingPageState extends State<BookingPage> {
             builder: (context) => BookingConfirmationPage(
               movieTitle: widget.movieTitle,
               seats: selectedSeats,
-              totalPrice: (selectedSeats.length * double.parse(widget.moviePrice)).toStringAsFixed(2),
+              totalPrice: totalPrice.toStringAsFixed(2),
               bookingId: responseData['bookingId'].toString(),
             ),
           ),
         );
       } else if (response.statusCode == 409) {
-        // Handle seat conflicts
         final bookedSeats = List<String>.from(responseData['bookedSeats']);
         setState(() {
           selectedSeats.removeWhere((seat) => bookedSeats.contains(seat));
@@ -126,7 +127,7 @@ class _BookingPageState extends State<BookingPage> {
         throw Exception(responseData['message'] ?? 'Booking failed');
       }
     } catch (e) {
-      print('Booking error: $e'); 
+      print('Booking error: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: ${e.toString()}')),
       );
@@ -140,42 +141,36 @@ class _BookingPageState extends State<BookingPage> {
         title: Text('Book ${widget.movieTitle}'),
       ),
       body: isLoading
-          ? Center(child: CircularProgressIndicator())
+          ? const Center(child: CircularProgressIndicator())
           : errorMessage != null
               ? Center(child: Text(errorMessage!))
               : Column(
                   children: [
-                    // Movie Info Section
                     Padding(
                       padding: const EdgeInsets.all(16.0),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            widget.movieTitle,
-                            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                          ),
-                          SizedBox(height: 8),
+                          Text(widget.movieTitle, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 8),
                           Text('Time: ${widget.movieTime}'),
                           Text('Price: \$${widget.moviePrice} per seat'),
-                          Divider(),
+                          const Divider(),
                           Text(
                             'Selected Seats: ${selectedSeats.isEmpty ? 'None' : selectedSeats.join(', ')}',
-                            style: TextStyle(fontWeight: FontWeight.bold),
+                            style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
                           Text(
                             'Total: \$${(selectedSeats.length * double.parse(widget.moviePrice)).toStringAsFixed(2)}',
-                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                           ),
                         ],
                       ),
                     ),
-                    
-                    // Seat Selection Grid
                     Expanded(
                       child: GridView.builder(
-                        padding: EdgeInsets.all(16),
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        padding: const EdgeInsets.all(16),
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 8,
                           childAspectRatio: 1,
                           mainAxisSpacing: 8,
@@ -183,27 +178,25 @@ class _BookingPageState extends State<BookingPage> {
                         ),
                         itemCount: availableSeats.length,
                         itemBuilder: (context, index) {
-                        final seat = availableSeats[index];
-                        return SeatWidget(
-                        seatNumber: seat['number'],
-                        isBooked: seat['isBooked'],
-                        isSelected: selectedSeats.contains(seat['number'].toString()),
-                        onTap: () => _toggleSeatSelection(seat['number'].toString()),
-    );
+                          final seat = availableSeats[index];
+                          return SeatWidget(
+                            seatNumber: seat['number'],
+                            isBooked: seat['isBooked'],
+                            isSelected: selectedSeats.contains(seat['number'].toString()),
+                            onTap: () => _toggleSeatSelection(seat['number'].toString()),
+                          );
                         },
                       ),
                     ),
-                    
-                    // Book Button
                     Padding(
                       padding: const EdgeInsets.all(16.0),
                       child: ElevatedButton(
                         onPressed: _confirmBooking,
                         style: ElevatedButton.styleFrom(
-                          minimumSize: Size(double.infinity, 50),
+                          minimumSize: const Size(double.infinity, 50),
                           backgroundColor: Colors.amber,
                         ),
-                        child: Text(
+                        child: const Text(
                           'CONFIRM BOOKING',
                           style: TextStyle(fontSize: 18, color: Colors.black),
                         ),
@@ -220,8 +213,8 @@ class SeatWidget extends StatelessWidget {
   final bool isBooked;
   final bool isSelected;
   final VoidCallback onTap;
-  final String? seatType; // Optional: 'standard', 'premium', 'vip'
-  final double seatSize; // Allows customization
+  final String? seatType;
+  final double seatSize;
 
   const SeatWidget({
     Key? key,
@@ -267,20 +260,15 @@ class SeatWidget extends StatelessWidget {
   }
 
   Color _getSeatColor() {
-    if (isBooked) {
-      return Colors.grey.shade400; // Booked seats
-    } else if (isSelected) {
-      return Colors.green.shade400; // Selected seats
-    } else {
-      // Available seats - different colors by type
-      switch (seatType) {
-        case 'premium':
-          return Colors.amber.shade300;
-        case 'vip':
-          return Colors.purple.shade300;
-        default: // standard
-          return Colors.blue.shade400;
-      }
+    if (isBooked) return Colors.grey.shade400;
+    if (isSelected) return Colors.green.shade400;
+    switch (seatType) {
+      case 'premium':
+        return Colors.amber.shade300;
+      case 'vip':
+        return Colors.purple.shade300;
+      default:
+        return Colors.blue.shade400;
     }
   }
 
@@ -315,41 +303,37 @@ class BookingConfirmationPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Booking Confirmed'),
-      ),
+      appBar: AppBar(title: const Text('Booking Confirmed')),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Center(
-              child: Icon(Icons.check_circle, color: Colors.green, size: 80),
-            ),
-            SizedBox(height: 20),
-            Center(
+            const Center(child: Icon(Icons.check_circle, color: Colors.green, size: 80)),
+            const SizedBox(height: 20),
+            const Center(
               child: Text(
                 'Booking Confirmed!',
                 style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               ),
             ),
-            SizedBox(height: 30),
-            Text('Movie: $movieTitle', style: TextStyle(fontSize: 18)),
-            Text('Booking ID: $bookingId', style: TextStyle(fontSize: 18)),
-            Text('Seats: ${seats.join(', ')}', style: TextStyle(fontSize: 18)),
-            Text('Total: \$$totalPrice', style: TextStyle(fontSize: 18)),
-            SizedBox(height: 30),
-            Text(
+            const SizedBox(height: 30),
+            Text('Movie: $movieTitle', style: const TextStyle(fontSize: 18)),
+            Text('Booking ID: $bookingId', style: const TextStyle(fontSize: 18)),
+            Text('Seats: ${seats.join(', ')}', style: const TextStyle(fontSize: 18)),
+            Text('Total: \$$totalPrice', style: const TextStyle(fontSize: 18)),
+            const SizedBox(height: 30),
+            const Text(
               'Please bring this confirmation to the theater box office to complete your purchase.',
               style: TextStyle(fontStyle: FontStyle.italic),
             ),
-            Spacer(),
+            const Spacer(),
             Center(
               child: ElevatedButton(
                 onPressed: () {
                   Navigator.of(context).popUntil((route) => route.isFirst);
                 },
-                child: Text('Back to Home'),
+                child: const Text('Back to Home'),
               ),
             ),
           ],

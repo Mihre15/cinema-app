@@ -68,12 +68,35 @@ async function query(sql, params) {
 }
 
 // Middleware to check if user is logged in
-// const requireLogin = (req, res, next) => {
-//   if (!req.session.userId) {
-//     return res.status(401).json({ message: "Please login first" });
-//   }
-//   next();
-// };
+// Update your requireLogin middleware
+const requireLogin = async (req, res, next) => {
+  console.log('Session ID:', req.sessionID); // 🚨 Debug
+  console.log('Session data:', req.session); // 🚨 Debug
+  console.log('Cookies:', req.headers.cookie); // 🚨 Debug
+
+  if (!req.session.userId) {
+    console.log('No user ID in session'); // Debug
+    return res.status(401).json({ message: "Please login first" });
+  }
+  
+  // Verify user exists
+  try {
+    const [users] = await pool.query(
+      'SELECT id FROM users WHERE id = ?', 
+      [req.session.userId]
+    );
+    
+    if (users.length === 0) {
+      console.log('User not found in database'); // Debug
+      return res.status(401).json({ message: "Invalid user session" });
+    }
+    
+    next();
+  } catch (err) {
+    console.error('Session verification error:', err);
+    res.status(500).json({ message: "Session verification failed" });
+  }
+};
 
 // Register User
 app.post("/signup", async (req, res) => {
@@ -265,6 +288,8 @@ app.get("/movies", async (req, res) => {
 app.delete("/movies/:id", async (req, res) => {
   const id = req.params.id;
   try {
+    await pool.query("DELETE FROM seats WHERE movie_id = ?", [id]);
+    
     const [result] = await pool.query("DELETE FROM movies WHERE id = ?", [id]);
     if (result.affectedRows === 0) {
       return res.status(404).json({ message: "Movie not found" });
@@ -277,10 +302,18 @@ app.delete("/movies/:id", async (req, res) => {
 });
 // booking 
 // booking endpoint - fixed
+// Booking seats
+// Booking seats (Login is optional now)
 app.post('/bookings', async (req, res) => {
+  console.log('🔥 /bookings endpoint reached!'); 
+  console.log('✅ Reached /bookings route');
+  console.log('Session ID:', req.sessionID);
+  console.log('Cookies:', req.headers.cookie);
+  console.log('Session data:', req.session);
+
   const { movie_id, seat_numbers } = req.body;
-  const user_id = req.session.userId;
-  
+  const user_id = req.session.userId || null;
+
   if (!seat_numbers || seat_numbers.length === 0) {
     return res.status(400).json({ message: 'Please select at least one seat' });
   }
@@ -299,40 +332,40 @@ app.post('/bookings', async (req, res) => {
 
     if (bookedSeats.length > 0) {
       const bookedNumbers = bookedSeats.map(s => s.seat_number);
-      return res.status(409).json({ 
+      return res.status(409).json({
         message: 'Some seats are already booked',
         bookedSeats: bookedNumbers
       });
     }
 
-    // Get movie price
+    // 2. Get movie price
     const [movie] = await connection.query(
       'SELECT price FROM movies WHERE id = ?',
       [movie_id]
     );
-    
+
     if (movie.length === 0) {
       return res.status(404).json({ message: 'Movie not found' });
     }
-    
+
     const pricePerSeat = movie[0].price;
     const totalPrice = seats.length * pricePerSeat;
 
-    // 2. Create booking record
+    // 3. Insert booking
     const [bookingResult] = await connection.query(
       'INSERT INTO bookings (user_id, movie_id, seat_numbers, total_price) VALUES (?, ?, ?, ?)',
       [user_id, movie_id, seats.join(','), totalPrice]
     );
-    
-    // 3. Update seats status
+
+    // 4. Update booked seats
     await connection.query(
       'UPDATE seats SET is_booked = 1 WHERE movie_id = ? AND seat_number IN (?)',
       [movie_id, seats]
     );
 
     await connection.commit();
-    
-    res.status(201).json({ 
+
+    res.status(201).json({
       message: 'Booking successful!',
       bookingId: bookingResult.insertId,
       seats: seats,
@@ -346,14 +379,15 @@ app.post('/bookings', async (req, res) => {
     connection.release();
   }
 });
+
+
 // Get seat availability for a movie
 app.get("/movies/:id/seats", async (req, res) => {
   try {
     const movieId = req.params.id;
-    
-    // Query to get all seats and their booked status for a specific movie
+
     const [seats] = await pool.query(
-      `SELECT 
+      `SELECT
         s.seat_number,
         s.is_booked,
         CASE WHEN s.is_booked = 1 THEN b.user_id ELSE NULL END as booked_by_user_id,
@@ -366,33 +400,76 @@ app.get("/movies/:id/seats", async (req, res) => {
       [movieId]
     );
 
-    // Alternative simpler query if you don't need user info:
-    // const [seats] = await pool.query(
-    //   "SELECT seat_number, is_booked FROM seats WHERE movie_id = ? ORDER BY seat_number",
-    //   [movieId]
-    // );
-
     res.status(200).json(seats);
   } catch (err) {
     console.error("Error fetching seat availability:", err);
     res.status(500).json({ message: "Failed to fetch seat availability", error: err.message });
   }
 });
-// Get user bookings
-app.get('/user/bookings',  async (req, res) => {
+
+// Get user bookings — NO requireLogin
+app.get('/user/bookings', async (req, res) => {
+  if (!req.session.userId) {
+    return res.status(401).json({ message: 'User not logged in' });
+  }
+
   try {
     const [bookings] = await pool.query(
-      `SELECT b.id, m.title, m.image, b.seat_numbers, b.booking_date 
+      `SELECT b.id, m.title, m.image, b.seat_numbers, b.booking_date
        FROM bookings b
        JOIN movies m ON b.movie_id = m.id
        WHERE b.user_id = ?`,
-      [req.userId]
+      [req.session.userId]
     );
     res.json(bookings);
   } catch (err) {
     res.status(500).json({ message: 'Error fetching bookings', error: err.message });
   }
 });
+// Get last booking for the current user
+app.get("/user/last-booking", async (req, res) => {
+  if (!req.session.userId) {
+    return res.status(401).json({ message: "User not logged in" });
+  }
+
+  try {
+    const [result] = await pool.query(
+      `SELECT b.id AS booking_id, b.seat_numbers, b.total_price, b.booking_date,
+              m.id AS movie_id, m.title, m.genre, m.time, m.price, m.image
+       FROM bookings b
+       JOIN movies m ON b.movie_id = m.id
+       WHERE b.user_id = ?
+       ORDER BY b.booking_date DESC
+       LIMIT 1`,
+      [req.session.userId]
+    );
+
+    if (result.length === 0) {
+      return res.status(404).json({ message: "No booking found" });
+    }
+
+    const booking = result[0];
+    res.status(200).json({
+      bookingId: booking.booking_id,
+      seats: booking.seat_numbers.split(","),
+      totalPrice: booking.total_price,
+      bookingDate: booking.booking_date,
+      movie: {
+        id: booking.movie_id,
+        title: booking.title,
+        genre: booking.genre,
+        time: booking.time,
+        price: booking.price,
+        image: booking.image
+      }
+    });
+  } catch (err) {
+    console.error("Error fetching last booking:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+
 
 // Ensure uploads folder exists
 const uploadDir = "./uploads";

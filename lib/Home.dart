@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import 'package:dio/dio.dart';
 import 'dart:convert';
 import 'SignUp.dart';
 import 'booking.dart';
 
 class Home extends StatefulWidget {
+  // final int userID;
   const Home({super.key});
 
   @override
@@ -13,12 +14,15 @@ class Home extends StatefulWidget {
 
 class _HomeState extends State<Home> {
   final String baseUrl = 'http://10.0.2.2:3000';
+  final Dio dio = Dio();
 
   Future<List<dynamic>> fetchMovies() async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/movies'));
+      final response = await dio.get('$baseUrl/movies');
       if (response.statusCode == 200) {
-        return jsonDecode(response.body);
+        return response.data is List
+            ? response.data
+            : jsonDecode(response.data.toString());
       } else {
         throw Exception('Failed to load movies: ${response.statusCode}');
       }
@@ -29,6 +33,7 @@ class _HomeState extends State<Home> {
 
   @override
   Widget build(BuildContext context) {
+    // print('Home loaded with userID: ${widget.userID}');
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
@@ -105,6 +110,7 @@ class _HomeState extends State<Home> {
                           movieTitle: title,
                           movieTime: time,
                           moviePrice: price,
+                          // userId: widget.userID,
                         ),
                       ),
                     );
@@ -130,7 +136,7 @@ class _HomeState extends State<Home> {
                                 '$baseUrl/uploads/$image',
                                 height: 180,
                                 width: double.infinity,
-                                fit: BoxFit.cover,
+                                fit: BoxFit.contain,
                                 errorBuilder: (context, error, stackTrace) => Container(
                                   height: 180,
                                   color: Colors.grey,
